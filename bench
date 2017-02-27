@@ -1,0 +1,235 @@
+<?php
+
+require __DIR__ . '/vendor/autoload.php';
+require __DIR__ . '/benchutils/testFunctions.php';
+require __DIR__ . '/benchutils/helpers.php';
+require __DIR__ . '/benchutils/benchFunctions.php';
+
+use Symfony\Component\Console\Output\ConsoleOutput;
+use Symfony\Component\Console\Formatter\OutputFormatter;
+use Symfony\Component\Console\Helper\Table;
+use Symfony\Component\Console\Helper\TableCell;
+use Symfony\Component\Console\Helper\TableSeparator;
+
+$output = new ConsoleOutput();
+$output->setFormatter(new OutputFormatter(true));
+
+$iterations  = 100000;
+$averageOver = 10;
+if (!empty($argv[1]) && ($argv[1] === '--help' || $argv[1] === '-h')) {
+    $output->writeln("<info>bench usage</info>
+<comment>no options</comment>  :   run with default iteration (" . number_format($iterations, 0, '.', ' ') . ") and default average rounds (" . number_format($averageOver, 0, '.', ' ') . ")
+<comment>options</comment>     :
+    <fg=cyan>-i=</><fg=magenta>[0-9]</>    Number of iterations. Each test will run this many time
+    <fg=cyan>-a=</><fg=magenta>[0-9]</>    Compute an average over this many test. Each test will execute
+                execute all its iterations this many time.
+");
+    exit;
+}
+
+for ($i = 1; $i <=2; $i++) {
+    if (!empty($argv[$i])) {
+        if (preg_match('`^-i=([0-9]+)$`', $argv[$i], $match)) {
+            $iterations = max(1, (int) $match[1]);
+        } else if (preg_match('`^-a=([0-9]+)$`', $argv[$i], $match)) {
+            $averageOver = max(1, (int) $match[1]);
+        }
+    }
+}
+
+define('ITERATIONS', $iterations);
+define('AVG_OVER', $averageOver);
+$param = null;
+$benchList = [
+    'instance'      => [
+        'invocationStr' => '[$instance, \'method\']',
+        'callable' => [new InstanceTest, 'methodTest'],
+        'vs'       => [
+            'call_user_func'         => 1,
+            'call_user_func_array'   => 1,
+            'Invoke'                 => 1,
+            'assignedClosureFactory' => 1,
+            'ClosureFactory'         => 1,
+            'InvokeCallUserFunc'     => 1,
+            'directImplementation'   => 1,
+            'directInstance'         => 1,
+        ],
+    ],
+   'static'        => [
+        'invocationStr' => '\'Class::method\'',
+        'callable' => 'StaticTest::methodTest',
+        'vs'       => [
+            'call_user_func'         => 1,
+            'call_user_func_array'   => 1,
+            'Invoke'                 => 1,
+            'assignedClosureFactory' => 1,
+            'ClosureFactory'         => 1,
+            'InvokeCallUserFunc'     => 1,
+            'directImplementation'   => 1,
+            'directStatic'           => 1,
+        ],
+    ],
+
+    'function'      => [
+        'invocationStr' => '\'function\'',
+        'callable' => 'functionTest',
+        'vs'       => [
+            'call_user_func'         => 1,
+            'call_user_func_array'   => 1,
+            'Invoke'                 => 1,
+            'assignedClosureFactory' => 1,
+            'ClosureFactory'         => 1,
+            'InvokeCallUserFunc'     => 1,
+            'directImplementation'   => 1,
+            'directFunction'         => 1,
+        ],
+    ],
+    'lambda'        => [
+        'invocationStr' => 'function($param) { return $param }',
+        'callable' => $lambdaTest,
+        'vs'       => [
+            'call_user_func'         => 1,
+            'call_user_func_array'   => 1,
+            'Invoke'                 => 1,
+            'assignedClosureFactory' => 1,
+            'ClosureFactory'         => 1,
+            'InvokeCallUserFunc'     => 1,
+            'directImplementation'   => 1,
+            'directLambda'           => 1,
+        ],
+    ],
+    'closure'       => [
+        'invocationStr' => 'function($param) use($use) { return $param }',
+        'callable' => $closureTest,
+        'vs'       => [
+            'call_user_func'         => 1,
+            'call_user_func_array'   => 1,
+            'Invoke'                 => 1,
+            'assignedClosureFactory' => 1,
+            'ClosureFactory'         => 1,
+            'InvokeCallUserFunc'     => 1,
+            'directImplementation'   => 1,
+            'directClosure'          => 1,
+        ],
+    ],
+];
+
+$report = [];
+exec('php -v', $phpVersion);
+$output->writeln("<info>Benchmarking call_user_func</info>");
+$output->writeln('<info>Iterations: ' . number_format($iterations, 0, '.', ' ') . "</info>");
+$output->writeln('<info>Averaged over: ' . number_format($averageOver, 0, '.', ' ') . "</info>");
+$output->writeln('<comment>' . implode(PHP_EOL, $phpVersion) . '</comment>');
+$output->writeln('<comment>' . php_uname() . '</comment>');
+
+// static calls
+$directTimes = [
+    'directStatic'        => 0,
+    'directInstance'      => 0,
+    'directFunction'      => 0,
+    'directLambda'        => 0,
+    'directClosure'       => 0,
+ ];
+
+foreach ($directTimes as $key => $value) {
+    $function = 'bench' . ucfirst($key);
+    $directTimes[$key] = $function($param);
+}
+
+$averages = [];
+
+// dynamic calls
+foreach ($benchList as $key => $value) {
+    $callable = $value['callable'];
+    $report[$key] = [];
+
+    foreach ($value['vs'] as $vs => $ignore) {
+        $benchFunc = 'bench' . ucfirst($vs);
+        $report[$key][$vs]['time'] = $benchFunc($callable, $param);
+        //if (!isset($directTimes[$vs])) {
+            $averages[$vs][] = $report[$key][$vs]['time'];
+        //}
+
+        if ($vs === 'call_user_function') {
+            $report[$key]['diff'] = 0;
+            $report[$key]['pct'] = 0;
+        } else {
+            calcVs($report[$key], $vs);
+        }
+    }
+
+    // compute vs direct*
+    foreach ($directTimes as $vs => $time) {
+        if (isset($value[$vs])) {
+            $report[$key][$vs]['time'] = $time;
+            calcVs($report[$key], $vs);
+        }
+    }
+
+    uksort($report[$key], "sortReportByDiff");
+}
+
+foreach ($averages as $k => $v) {
+    $averages[$k] = array_sum($averages[$k]) / count($averages[$k]);
+}
+
+natsort($averages);
+
+$localHeaders     = ['method' => 'Invocation', 'time' => 'Time (s)','diff' => 'Delta (s)', 'pct' => '%'];
+$localRowDefaults = ['method' => '', 'time' => '','diff' => '', 'pct' => ''];
+
+foreach ($report as $type => $bench) {
+    $output->writeln('');
+    $output->writeln("<info>$type ~ {$benchList[$type]['invocationStr']}</info>");
+
+    $localTable = new Table($output);
+    foreach ($bench as $key => $value) {
+        $localRows = $localRowDefaults;
+        if ($key === 'call_user_func') {
+            $localRows['method'] = "<comment>$key</comment>";
+            $localRows['diff']   = $localRows['pct'] = '';
+        } else {
+            if ($key === 'call_user_func_array') {
+                $localRows['method'] = "<comment>$key</comment>";
+            } else {
+                $localRows['method'] = $key;
+            }
+            $localRows['diff']   = formatDiff(number_format($value['diff'], 4, '.', ' '), $value['diff']);
+            $localRows['pct']    = formatDiff(number_format($value['pct'], 2, '.', ' '), $value['pct']);
+        }
+
+        $localRows['time'] = formatDiff(number_format($value['time'], 4, '.', ' '), $value['diff'], '');
+
+        $localTable->addRow($localRows);
+    }
+    $localTable->setHeaders($localHeaders)->render();
+}
+
+$localTable = new Table($output);
+$output->writeln('');
+$output->writeln("<info>Overall Average</info>");
+$call_user_func_avg = $averages['call_user_func'];
+foreach ($averages as $vs => $time) {
+    $localRows = $localRowDefaults;
+    if ($vs === 'call_user_func') {
+        $localRows['method'] = "<comment>$vs</comment>";
+        $diff = $localRows['diff']   = $localRows['pct'] = '';
+    } else {
+        if ($vs === 'call_user_func_array') {
+            $localRows['method'] = "<comment>$vs</comment>";
+        } else {
+            $localRows['method'] = $vs;
+        }
+        $diff = $time - $call_user_func_avg;
+        $pct  = $diff * 100 / $call_user_func_avg;
+        $localRows['diff'] = formatDiff(number_format($diff, 4, '.', ' '), $diff);
+        $localRows['pct']  = formatDiff(number_format($pct, 2, '.', ' '), $pct);
+    }
+
+    $localRows['time'] = formatDiff(number_format($time, 4, '.', ' '), $diff, '');
+    $localTable->addRow($localRows);
+}
+$localTable->setHeaders($localHeaders)->render();
+
+$output->writeln('');
+$output->writeln(PHP_Timer::resourceUsage());
