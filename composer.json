@@ -16,7 +16,7 @@
     },
     "require-dev": {
         "phpunit/php-timer": "^1.0",
-        "symfony/console": "^3.2"
+        "symfony/console": "^4.0|^3.4"
     },
     "autoload": {
         "classmap": [

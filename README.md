@@ -1,6 +1,6 @@
 # call_user_func
 
-[call_user_func()](https://php.net/call_user_func) and [call_user_func_array()](https://php.net/call_user_func_array) are often mentioned as "slow". At some point I needed to know how by much this could impact processes involving very large amount of Callable calls.
+[call_user_func()](https://php.net/call_user_func) and [call_user_func_array()](https://php.net/call_user_func_array) are often mentioned as "slow". At some point I needed to know by how much this could impact processes involving very large amount of Callable calls.
 
 ## The problem
 
@@ -300,13 +300,16 @@ Analyzing further, some interesting things to note are :
 * The few ifs of a direct implementation are costing too much
 * closure factory is surprisingly slow
 * assigned closure factory is as expected a bit slower than simple closure factory, but it's not very significant
-* php7 is a lot faster, with a bit more ram usage
+* php7 is a lot faster, with a bit more ram usage, but this should not actually matter since php7 has way better ram handling / sharing overall
+* Not much difference between php 7.1 and 7.2
 
 ## Results
+
 Test ran on win10 with Intel(R) Core(TM) i7-2600K CPU @ 3.40GHz
 
 ### PHP 5.6.30
-```bash
+
+```shell
 $ php bench
 Benchmarking call_user_func
 Iterations: 100 000
@@ -408,7 +411,8 @@ Time: 13.83 seconds, Memory: 1.00MB
 ```
 
 ### PHP 7.1.2
-```bash
+
+```shell
 $ php bench
 Benchmarking call_user_func
 Iterations: 100 000
@@ -507,4 +511,107 @@ Overall Average
 +------------------------+----------+-----------+--------+
 
 Time: 7.69 seconds, Memory: 2.00MB
+```
+
+### PHP 7.2.0
+
+```shell
+$ php bench
+Benchmarking call_user_func
+Iterations: 100 000
+Averaged over: 10
+PHP 7.2.0 (cli) (built: Nov 28 2017 23:48:32) ( NTS MSVC15 (Visual C++ 2017) x64 )
+Copyright (c) 1997-2017 The PHP Group
+Zend Engine v3.2.0, Copyright (c) 1998-2017 Zend Technologies
+Windows NT 10.0 build 17134 (Windows 10) AMD64
+
+instance ~ [$instance, 'method']
++------------------------+----------+-----------+--------+
+| Invocation             | Time (s) | Delta (s) | %      |
++------------------------+----------+-----------+--------+
+| directInstance         | 0.0060   | -0.0070   | -53.88 |
+| call_user_func         | 0.0131   |           |        |
+| call_user_func_array   | 0.0136   | +0.0006   | +4.29  |
+| directImplementation   | 0.0163   | +0.0032   | +24.67 |
+| Invoke                 | 0.0193   | +0.0063   | +47.97 |
+| ClosureFactory         | 0.0218   | +0.0087   | +66.62 |
+| assignedClosureFactory | 0.0230   | +0.0100   | +76.26 |
+| InvokeCallUserFunc     | 0.0248   | +0.0117   | +89.60 |
++------------------------+----------+-----------+--------+
+
+static ~ 'Class::method'
++------------------------+----------+-----------+--------+
+| Invocation             | Time (s) | Delta (s) | %      |
++------------------------+----------+-----------+--------+
+| directStatic           | 0.0053   | -0.0234   | -81.62 |
+| Invoke                 | 0.0241   | -0.0046   | -15.94 |
+| call_user_func_array   | 0.0284   | -0.0004   | -1.29  |
+| ClosureFactory         | 0.0286   | -0.0001   | -0.30  |
+| call_user_func         | 0.0287   |           |        |
+| assignedClosureFactory | 0.0298   | +0.0011   | +3.82  |
+| InvokeCallUserFunc     | 0.0392   | +0.0105   | +36.61 |
+| directImplementation   | 0.0527   | +0.0239   | +83.33 |
++------------------------+----------+-----------+--------+
+
+function ~ 'function'
++------------------------+----------+-----------+---------+
+| Invocation             | Time (s) | Delta (s) | %       |
++------------------------+----------+-----------+---------+
+| directFunction         | 0.0046   | -0.0068   | -59.38  |
+| call_user_func         | 0.0114   |           |         |
+| call_user_func_array   | 0.0120   | +0.0006   | +4.87   |
+| Invoke                 | 0.0194   | +0.0080   | +69.58  |
+| ClosureFactory         | 0.0203   | +0.0089   | +77.65  |
+| InvokeCallUserFunc     | 0.0231   | +0.0117   | +101.96 |
+| assignedClosureFactory | 0.0236   | +0.0122   | +106.44 |
+| directImplementation   | 0.0246   | +0.0132   | +115.53 |
++------------------------+----------+-----------+---------+
+
+lambda ~ function($param) { return $param }
++------------------------+----------+-----------+---------+
+| Invocation             | Time (s) | Delta (s) | %       |
++------------------------+----------+-----------+---------+
+| call_user_func         | 0.0068   |           |         |
+| directLambda           | 0.0071   | +0.0003   | +4.25   |
+| call_user_func_array   | 0.0071   | +0.0003   | +4.90   |
+| directImplementation   | 0.0094   | +0.0026   | +38.15  |
+| ClosureFactory         | 0.0143   | +0.0075   | +110.75 |
+| Invoke                 | 0.0145   | +0.0077   | +113.12 |
+| assignedClosureFactory | 0.0154   | +0.0086   | +126.33 |
+| InvokeCallUserFunc     | 0.0179   | +0.0111   | +163.06 |
++------------------------+----------+-----------+---------+
+
+closure ~ function($param) use($use) { return $param }
++------------------------+----------+-----------+---------+
+| Invocation             | Time (s) | Delta (s) | %       |
++------------------------+----------+-----------+---------+
+| directClosure          | 0.0085   | -0.0004   | -4.16   |
+| call_user_func         | 0.0089   |           |         |
+| call_user_func_array   | 0.0089   | +0.0000   | +0.16   |
+| directImplementation   | 0.0111   | +0.0022   | +24.76  |
+| Invoke                 | 0.0154   | +0.0065   | +72.94  |
+| ClosureFactory         | 0.0179   | +0.0090   | +100.94 |
+| assignedClosureFactory | 0.0186   | +0.0097   | +109.08 |
+| InvokeCallUserFunc     | 0.0203   | +0.0114   | +128.14 |
++------------------------+----------+-----------+---------+
+
+Overall Average
++------------------------+----------+-----------+--------+
+| Invocation             | Time (s) | Delta (s) | %      |
++------------------------+----------+-----------+--------+
+| directFunction         | 0.0046   | -0.0091   | -66.30 |
+| directStatic           | 0.0053   | -0.0085   | -61.71 |
+| directInstance         | 0.0060   | -0.0078   | -56.29 |
+| directLambda           | 0.0071   | -0.0067   | -48.52 |
+| directClosure          | 0.0085   | -0.0053   | -38.15 |
+| call_user_func         | 0.0138   |           |        |
+| call_user_func_array   | 0.0140   | +0.0002   | +1.59  |
+| Invoke                 | 0.0186   | +0.0048   | +34.58 |
+| ClosureFactory         | 0.0206   | +0.0068   | +49.35 |
+| assignedClosureFactory | 0.0221   | +0.0083   | +60.26 |
+| directImplementation   | 0.0228   | +0.0090   | +65.53 |
+| InvokeCallUserFunc     | 0.0251   | +0.0113   | +81.80 |
++------------------------+----------+-----------+--------+
+
+Time: 7.97 seconds, Memory: 2.00MB
 ```
